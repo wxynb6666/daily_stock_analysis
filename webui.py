@@ -19,6 +19,7 @@ API Endpoints:
   GET  /              - 配置页面
   GET  /health        - 健康检查
   GET  /analysis?code=xxx - 触发单只股票异步分析
+  GET  /kline?code=xxx - 获取K线数据
   GET  /tasks         - 查询任务列表
   GET  /task?id=xxx   - 查询任务状态
   POST /update        - 更新配置
@@ -117,6 +118,7 @@ def main() -> int:
     print("  GET  /              - 配置页面")
     print("  GET  /health        - 健康检查")
     print("  GET  /analysis?code=xxx - 触发分析")
+    print("  GET  /kline?code=xxx - K线数据")
     print("  GET  /tasks         - 任务列表")
     print("  GET  /task?id=xxx   - 任务状态")
     print("  POST /update        - 更新配置")

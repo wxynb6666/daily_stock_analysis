@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any, List, Union
 
 from src.enums import ReportType
 from bot.models import BotMessage
+from data_provider.base import DataFetcherManager
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +314,56 @@ class AnalysisService:
             return {"success": False, "task_id": task_id, "error": error_msg}
 
 
+class MarketDataService:
+    """行情数据服务（用于 Web K 线图）"""
+
+    def __init__(self):
+        self._fetcher_manager: DataFetcherManager | None = None
+
+    def get_kline_data(self, code: str, days: int = 120) -> Dict[str, Any]:
+        """
+        获取股票 K 线数据
+
+        Args:
+            code: 股票代码
+            days: 最近天数
+
+        Returns:
+            前端可直接渲染的 K 线 JSON 数据
+        """
+        normalized_code = code.strip().upper()
+
+        if self._fetcher_manager is None:
+            self._fetcher_manager = DataFetcherManager()
+
+        df, source_name = self._fetcher_manager.get_daily_data(
+            stock_code=normalized_code,
+            days=days
+        )
+
+        if df is None or df.empty:
+            raise ValueError(f"未获取到 {normalized_code} 的 K 线数据")
+
+        chart_items = []
+        for _, row in df.tail(days).iterrows():
+            chart_items.append({
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": float(row["volume"]),
+            })
+
+        return {
+            "success": True,
+            "code": normalized_code,
+            "source": source_name,
+            "count": len(chart_items),
+            "data": chart_items,
+        }
+
+
 # ============================================================
 # 便捷函数
 # ============================================================
@@ -325,3 +376,14 @@ def get_config_service() -> ConfigService:
 def get_analysis_service() -> AnalysisService:
     """获取分析服务单例"""
     return AnalysisService.get_instance()
+
+
+_market_data_service: MarketDataService | None = None
+
+
+def get_market_data_service() -> MarketDataService:
+    """获取行情数据服务实例"""
+    global _market_data_service
+    if _market_data_service is None:
+        _market_data_service = MarketDataService()
+    return _market_data_service

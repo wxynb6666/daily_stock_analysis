@@ -23,7 +23,7 @@ from http import HTTPStatus
 from datetime import datetime
 from typing import Dict, Any, TYPE_CHECKING
 
-from web.services import get_config_service, get_analysis_service
+from web.services import get_config_service, get_analysis_service, get_market_data_service
 from web.templates import render_config_page
 from src.enums import ReportType
 
@@ -130,6 +130,7 @@ class ApiHandler:
     
     def __init__(self):
         self.analysis_service = get_analysis_service()
+        self.market_data_service = None
     
     def handle_health(self) -> Response:
         """
@@ -223,6 +224,50 @@ class ApiHandler:
         tasks = self.analysis_service.list_tasks(limit=limit)
         return JsonResponse({"success": True, "tasks": tasks})
     
+
+    def handle_kline(self, query: Dict[str, list]) -> Response:
+        """
+        获取 K 线数据 GET /kline?code=xxx&days=120
+        """
+        code_list = query.get("code", [])
+        if not code_list or not code_list[0].strip():
+            return JsonResponse(
+                {"success": False, "error": "缺少必填参数: code (股票代码)"},
+                status=HTTPStatus.BAD_REQUEST
+            )
+
+        code = code_list[0].strip().upper()
+
+        is_a_stock = re.match(r'^\d{6}$', code)
+        is_hk_stock = re.match(r'^HK\d{5}$', code)
+        is_us_stock = re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,2})?$', code)
+
+        if not (is_a_stock or is_hk_stock or is_us_stock):
+            return JsonResponse(
+                {"success": False, "error": f"无效的股票代码格式: {code}"},
+                status=HTTPStatus.BAD_REQUEST
+            )
+
+        days_list = query.get("days", ["120"])
+        try:
+            days = int(days_list[0])
+        except (TypeError, ValueError):
+            days = 120
+
+        days = max(30, min(days, 500))
+
+        try:
+            if self.market_data_service is None:
+                self.market_data_service = get_market_data_service()
+            result = self.market_data_service.get_kline_data(code=code, days=days)
+            return JsonResponse(result)
+        except Exception as e:
+            logger.error(f"[ApiHandler] 获取 K 线数据失败: {code} - {e}")
+            return JsonResponse(
+                {"success": False, "error": f"获取 K 线数据失败: {str(e)}"},
+                status=HTTPStatus.INTERNAL_SERVER_ERROR
+            )
+
     def handle_task_status(self, query: Dict[str, list]) -> Response:
         """
         查询单个任务状态 GET /task?id=xxx

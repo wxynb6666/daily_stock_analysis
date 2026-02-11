@@ -259,6 +259,50 @@ button:active {
     background-color: #059669;
 }
 
+.btn-kline {
+    background-color: #0ea5e9;
+}
+
+.btn-kline:hover {
+    background-color: #0284c7;
+}
+
+
+/* Kline chart section */
+.kline-section {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: #fff;
+}
+
+.kline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    gap: 0.5rem;
+}
+
+.kline-title {
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+.kline-meta {
+    font-size: 0.75rem;
+    color: var(--text-light);
+}
+
+#kline_canvas {
+    width: 100%;
+    height: 280px;
+    display: block;
+    border-radius: 0.4rem;
+    background: #fafcff;
+}
+
 .btn-analysis:disabled {
     background-color: var(--text-light);
     cursor: not-allowed;
@@ -634,6 +678,7 @@ def render_config_page(
 (function() {
     const codeInput = document.getElementById('analysis_code');
     const submitBtn = document.getElementById('analysis_btn');
+    const klineBtn = document.getElementById('kline_btn');
     const taskList = document.getElementById('task_list');
     const reportTypeSelect = document.getElementById('report_type');
     
@@ -658,8 +703,8 @@ def render_config_page(
     codeInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (!submitBtn.disabled) {
-                submitAnalysis();
+            if (window.loadKline && !klineBtn.disabled) {
+                window.loadKline(codeInput.value.trim());
             }
         }
     });
@@ -671,7 +716,9 @@ def render_config_page(
         const isHKStock = /^HK\\d{5}$/.test(code);        // 港股: HK00700
         const isUSStock =  /^[A-Z]{1,5}(\.[A-Z]{1,2})?$/.test(code); // 美股: AAPL
 
-        submitBtn.disabled = !(isAStock || isHKStock || isUSStock);
+        const isValidCode = (isAStock || isHKStock || isUSStock);
+        submitBtn.disabled = !isValidCode;
+        if (klineBtn) klineBtn.disabled = !isValidCode;
     }
     
     // 格式化时间
@@ -914,6 +961,124 @@ def render_config_page(
 </script>
 """
     
+    
+    kline_js = """
+<script>
+(function() {
+    const canvas = document.getElementById('kline_canvas');
+    const meta = document.getElementById('kline_meta');
+    if (!canvas || !meta) return;
+
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+        const ratio = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.floor(rect.width * ratio);
+        canvas.height = Math.floor(rect.height * ratio);
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    function drawKline(items, code) {
+        resizeCanvas();
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+
+        ctx.clearRect(0, 0, width, height);
+        if (!items || items.length === 0) {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '13px sans-serif';
+            ctx.fillText('暂无可绘制的K线数据', 12, 24);
+            return;
+        }
+
+        const padding = { top: 18, right: 10, bottom: 24, left: 10 };
+        const plotW = width - padding.left - padding.right;
+        const plotH = height - padding.top - padding.bottom;
+
+        let minPrice = Math.min(...items.map(i => i.low));
+        let maxPrice = Math.max(...items.map(i => i.high));
+        if (maxPrice === minPrice) {
+            maxPrice += 1;
+            minPrice -= 1;
+        }
+
+        const toY = (price) => padding.top + (maxPrice - price) / (maxPrice - minPrice) * plotH;
+        const n = items.length;
+        const slot = plotW / n;
+        const bodyW = Math.max(2, slot * 0.55);
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (plotH / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+        }
+
+        items.forEach((it, idx) => {
+            const x = padding.left + idx * slot + slot / 2;
+            const yHigh = toY(it.high);
+            const yLow = toY(it.low);
+            const yOpen = toY(it.open);
+            const yClose = toY(it.close);
+            const rise = it.close >= it.open;
+            const color = rise ? '#ef4444' : '#10b981';
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, yHigh);
+            ctx.lineTo(x, yLow);
+            ctx.stroke();
+
+            const top = Math.min(yOpen, yClose);
+            const h = Math.max(1, Math.abs(yClose - yOpen));
+            ctx.fillStyle = color;
+            ctx.fillRect(x - bodyW / 2, top, bodyW, h);
+        });
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = '11px monospace';
+        ctx.fillText(minPrice.toFixed(2), 10, height - 8);
+        ctx.fillText(maxPrice.toFixed(2), 10, 16);
+
+        const last = items[items.length - 1];
+        meta.textContent = code + ' · 收盘 ' + last.close.toFixed(2) + ' · 数据点 ' + items.length;
+    }
+
+    window.loadKline = function(code) {
+        if (!code) return;
+        meta.textContent = '加载 ' + code + ' K线中...';
+        fetch('/kline?code=' + encodeURIComponent(code) + '&days=120')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    drawKline(data.data, data.code || code);
+                } else {
+                    meta.textContent = '加载失败: ' + (data.error || '未知错误');
+                    drawKline([], code);
+                }
+            })
+            .catch(err => {
+                meta.textContent = '加载失败: ' + err.message;
+                drawKline([], code);
+            });
+    };
+
+    window.addEventListener('resize', () => {
+        const code = document.getElementById('analysis_code')?.value?.trim();
+        if (code) {
+            window.loadKline(code);
+        }
+    });
+
+    drawKline([], '');
+})();
+</script>
+"""
     content = f"""
   <div class="container">
     <h2>📈 A股/港股/美股分析</h2>
@@ -933,6 +1098,9 @@ def render_config_page(
             <option value="simple">📝 精简报告</option>
             <option value="full">📊 完整报告</option>
           </select>
+          <button type="button" id="kline_btn" class="btn-kline" onclick="loadKline(document.getElementById('analysis_code').value.trim())" disabled>
+            📉 K线
+          </button>
           <button type="button" id="analysis_btn" class="btn-analysis" onclick="submitAnalysis()" disabled>
             🚀 分析
           </button>
@@ -941,6 +1109,14 @@ def render_config_page(
       
       <!-- 任务列表 -->
       <div id="task_list" class="task-list"></div>
+
+      <div class="kline-section">
+        <div class="kline-header">
+          <div class="kline-title">📉 K线图（最近120日）</div>
+          <div id="kline_meta" class="kline-meta">输入股票代码后点击「📉 K线」查看</div>
+        </div>
+        <canvas id="kline_canvas"></canvas>
+      </div>
     </div>
     
     <hr class="section-divider">
@@ -961,12 +1137,13 @@ def render_config_page(
     </form>
     
     <div class="footer">
-      <p>API: <code>/health</code> · <code>/analysis?code=xxx</code> · <code>/tasks</code></p>
+      <p>API: <code>/health</code> · <code>/analysis?code=xxx</code> · <code>/kline?code=xxx</code> · <code>/tasks</code></p>
     </div>
   </div>
   
   {toast_html}
   {analysis_js}
+  {kline_js}
 """
     
     page = render_base(
@@ -990,7 +1167,6 @@ def render_error_page(
         details: 详细信息
     """
     details_html = f"<p class='text-muted'>{html.escape(details)}</p>" if details else ""
-    
     content = f"""
   <div class="container" style="text-align: center;">
     <h2>😵 {status_code}</h2>

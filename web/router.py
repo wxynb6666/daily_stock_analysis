@@ -322,6 +322,12 @@ def create_default_router() -> Router:
         "查询任务状态"
     )
     
+    router.register(
+        "/kline", "GET",
+        lambda q: api_handler.handle_kline(q),
+        "获取股票K线数据"
+    )
+    
     # === Bot Webhook 路由 ===
     # 注意：Bot Webhook 路由在 dispatch_post 中特殊处理
     # 这里只是为了在路由列表中显示
